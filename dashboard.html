@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>IoT Security Dashboard — AKS University</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:        #020b18;
+    --bg2:       #061220;
+    --bg3:       #091a2e;
+    --border:    #0e3556;
+    --accent:    #00e5ff;
+    --accent2:   #7b2fff;
+    --green:     #00ff88;
+    --red:       #ff2d55;
+    --orange:    #ff9f0a;
+    --yellow:    #ffd60a;
+    --text:      #c8e4f8;
+    --text-dim:  #4a7fa8;
+    --glow:      0 0 12px rgba(0,229,255,0.4);
+    --glow-red:  0 0 12px rgba(255,45,85,0.5);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 15px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grid noise overlay ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.015) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ── Header ── */
+  header {
+    position: relative; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px;
+    background: linear-gradient(90deg, #061220ee, #020b18ee);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 2px 20px rgba(0,0,0,0.6);
+  }
+  .logo {
+    font-family: 'Orbitron', monospace;
+    font-size: 18px; font-weight: 900;
+    color: var(--accent);
+    text-shadow: var(--glow);
+    letter-spacing: 2px;
+  }
+  .logo span { color: var(--accent2); }
+  .header-right { display: flex; align-items: center; gap: 20px; }
+  .badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px; color: var(--text-dim);
+    border: 1px solid var(--border); padding: 4px 10px;
+    border-radius: 3px;
+  }
+  #status-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--text-dim);
+    box-shadow: none;
+    transition: all 0.4s;
+    display: inline-block;
+  }
+  #status-dot.active {
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  /* ── Controls ── */
+  .controls {
+    position: relative; z-index: 10;
+    display: flex; gap: 12px; padding: 14px 28px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    flex-wrap: wrap; align-items: center;
+  }
+  .btn {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; padding: 8px 18px;
+    border: 1px solid currentColor;
+    border-radius: 3px; cursor: pointer;
+    background: transparent;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .btn-start  { color: var(--green); }
+  .btn-start:hover  { background: rgba(0,255,136,0.1); box-shadow: 0 0 10px rgba(0,255,136,0.3); }
+  .btn-stop   { color: var(--red); }
+  .btn-stop:hover   { background: rgba(255,45,85,0.1); box-shadow: var(--glow-red); }
+  .btn-train  { color: var(--accent); }
+  .btn-train:hover  { background: rgba(0,229,255,0.1); box-shadow: var(--glow); }
+  #monitor-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px; color: var(--text-dim);
+    margin-left: auto;
+  }
+
+  /* ── Main layout ── */
+  main {
+    position: relative; z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 340px;
+    grid-template-rows: auto auto 1fr;
+    gap: 14px; padding: 18px 28px;
+    min-height: calc(100vh - 120px);
+  }
+
+  /* ── Stat cards ── */
+  .stat-cards {
+    grid-column: 1 / 4;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .stat-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px; padding: 18px 20px;
+    position: relative; overflow: hidden;
+    transition: border-color 0.3s;
+  }
+  .stat-card:hover { border-color: var(--accent); }
+  .stat-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 2px;
+  }
+  .stat-card.c1::before { background: var(--accent); }
+  .stat-card.c2::before { background: var(--green); }
+  .stat-card.c3::before { background: var(--red); }
+  .stat-card.c4::before { background: var(--orange); }
+  .stat-label {
+    font-size: 11px; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .stat-value {
+    font-family: 'Orbitron', monospace;
+    font-size: 28px; font-weight: 900;
+    line-height: 1;
+  }
+  .stat-card.c1 .stat-value { color: var(--accent); text-shadow: var(--glow); }
+  .stat-card.c2 .stat-value { color: var(--green); }
+  .stat-card.c3 .stat-value { color: var(--red); text-shadow: var(--glow-red); }
+  .stat-card.c4 .stat-value { color: var(--orange); }
+  .stat-sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
+
+  /* ── Panels ── */
+  .panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 6px; overflow: hidden;
+  }
+  .panel-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg3);
+  }
+  .panel-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 2px; color: var(--accent);
+    text-transform: uppercase;
+  }
+  .panel-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; color: var(--text-dim);
+    border: 1px solid var(--border); padding: 2px 8px;
+  }
+  .panel-body { padding: 14px; }
+
+  /* ── Charts ── */
+  .chart-traffic {
+    grid-column: 1 / 3;
+    grid-row: 2;
+  }
+  .chart-protocol {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  .chart-traffic canvas { height: 180px !important; }
+  .chart-protocol canvas { height: 180px !important; }
+
+  /* ── Alerts panel (right column) ── */
+  .alerts-panel {
+    grid-column: 4;
+    grid-row: 1 / 4;
+    display: flex; flex-direction: column;
+    max-height: calc(100vh - 150px);
+  }
+  .alerts-panel .panel { flex: 1; display: flex; flex-direction: column; }
+  .alerts-panel .panel-body {
+    flex: 1; overflow-y: auto; padding: 0;
+  }
+  .alert-item {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(14,53,86,0.5);
+    animation: slideIn 0.3s ease;
+  }
+  @keyframes slideIn { from{opacity:0;transform:translateX(10px)} to{opacity:1;transform:none} }
+  .alert-severity {
+    font-family: 'Orbitron', monospace;
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 1px; padding: 2px 6px;
+    border-radius: 2px; margin-right: 6px;
+  }
+  .sev-CRITICAL { background: rgba(255,45,85,0.2); color: var(--red); border: 1px solid var(--red); }
+  .sev-HIGH     { background: rgba(255,159,10,0.2); color: var(--orange); border: 1px solid var(--orange); }
+  .sev-MEDIUM   { background: rgba(255,214,10,0.2); color: var(--yellow); border: 1px solid var(--yellow); }
+  .sev-LOW      { background: rgba(0,229,255,0.1); color: var(--text-dim); border: 1px solid var(--border); }
+  .alert-reason { font-size: 12px; color: var(--text); margin-top: 4px; }
+  .alert-meta {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px; color: var(--text-dim); margin-top: 3px;
+  }
+
+  /* ── Packet table ── */
+  .packet-panel {
+    grid-column: 1 / 4;
+    grid-row: 3;
+  }
+  .packet-table-wrap {
+    overflow-y: auto; max-height: 240px;
+  }
+  table {
+    width: 100%; border-collapse: collapse;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+  }
+  th {
+    padding: 8px 12px; text-align: left;
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0;
+    background: var(--bg3); z-index: 1;
+  }
+  td { padding: 6px 12px; border-bottom: 1px solid rgba(14,53,86,0.3); }
+  tr.anomaly { background: rgba(255,45,85,0.06); }
+  tr.anomaly td:first-child { border-left: 2px solid var(--red); }
+  tr:not(.anomaly):hover { background: rgba(0,229,255,0.04); }
+  .tag {
+    display: inline-block; padding: 1px 6px; border-radius: 2px;
+    font-size: 10px; font-family: 'Share Tech Mono', monospace;
+  }
+  .tag-tcp   { background: rgba(0,229,255,0.1); color: var(--accent); }
+  .tag-udp   { background: rgba(123,47,255,0.2); color: var(--accent2); }
+  .tag-http  { background: rgba(0,255,136,0.1); color: var(--green); }
+  .tag-https { background: rgba(0,255,136,0.15); color: var(--green); }
+  .tag-dns   { background: rgba(255,214,10,0.1); color: var(--yellow); }
+  .tag-other { background: rgba(74,127,168,0.15); color: var(--text-dim); }
+  .anomaly-tag {
+    background: rgba(255,45,85,0.15); color: var(--red);
+    border: 1px solid rgba(255,45,85,0.3); padding: 1px 8px;
+    border-radius: 2px; font-size: 10px;
+  }
+  .clean-tag {
+    color: var(--green); font-size: 10px;
+  }
+
+  /* ── Top IPs ── */
+  .ip-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .ip-label { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text); min-width: 120px; }
+  .ip-track { flex: 1; height: 6px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .ip-fill  { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width 0.6s; }
+  .ip-count { font-family: 'Share Tech Mono', monospace; font-size: 11px; color: var(--text-dim); }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--bg3); border: 1px solid var(--accent);
+    color: var(--accent); padding: 10px 18px;
+    font-family: 'Share Tech Mono', monospace; font-size: 13px;
+    border-radius: 4px; box-shadow: var(--glow);
+    opacity: 0; transform: translateY(10px);
+    transition: all 0.3s; z-index: 9999;
+    pointer-events: none;
+  }
+  #toast.show { opacity: 1; transform: none; }
+
+  /* ── Scrollbar ── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">IoT<span>SEC</span> · GATEWAY</div>
+  <div class="header-right">
+    <div class="badge">AKS UNIVERSITY · SATNA</div>
+    <div class="badge">MOLURAM KUSHWAHA · B2455R10175010</div>
+    <span id="status-dot" title="Monitoring Status"></span>
+    <span style="font-family:'Share Tech Mono',monospace;font-size:12px;color:var(--text-dim)" id="clock"></span>
+  </div>
+</header>
+
+<div class="controls">
+  <button class="btn btn-start"  onclick="startMonitor()">▶ START MONITOR</button>
+  <button class="btn btn-stop"   onclick="stopMonitor()">■ STOP MONITOR</button>
+  <button class="btn btn-train"  onclick="trainModel()">⬡ TRAIN ML MODEL</button>
+  <span id="monitor-label">STATUS: IDLE</span>
+</div>
+
+<main>
+
+  <!-- Stat Cards -->
+  <div class="stat-cards">
+    <div class="stat-card c1">
+      <div class="stat-label">Packets Captured</div>
+      <div class="stat-value" id="stat-total">0</div>
+      <div class="stat-sub">total network packets</div>
+    </div>
+    <div class="stat-card c2">
+      <div class="stat-label">Clean Traffic</div>
+      <div class="stat-value" id="stat-clean">0</div>
+      <div class="stat-sub">normal packets</div>
+    </div>
+    <div class="stat-card c3">
+      <div class="stat-label">Anomalies</div>
+      <div class="stat-value" id="stat-anomaly">0</div>
+      <div class="stat-sub">suspicious packets</div>
+    </div>
+    <div class="stat-card c4">
+      <div class="stat-label">Unique IPs</div>
+      <div class="stat-value" id="stat-ips">0</div>
+      <div class="stat-sub">active endpoints</div>
+    </div>
+  </div>
+
+  <!-- Traffic over time chart -->
+  <div class="panel chart-traffic">
+    <div class="panel-header">
+      <span class="panel-title">Traffic Volume · Live</span>
+      <span class="panel-badge" id="pps-badge">0 pkt/s</span>
+    </div>
+    <div class="panel-body">
+      <canvas id="trafficChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Protocol distribution -->
+  <div class="panel chart-protocol">
+    <div class="panel-header">
+      <span class="panel-title">Protocol Distribution</span>
+    </div>
+    <div class="panel-body">
+      <canvas id="protoChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Alerts (right column spans all rows) -->
+  <div class="alerts-panel">
+    <div class="panel" style="height:100%">
+      <div class="panel-header">
+        <span class="panel-title">🚨 Live Alerts</span>
+        <span class="panel-badge" id="alert-count-badge">0</span>
+      </div>
+      <div class="panel-body" id="alerts-list">
+        <div style="padding:20px;color:var(--text-dim);font-size:12px;text-align:center">
+          No alerts yet. Start monitoring to detect threats.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Packet table -->
+  <div class="panel packet-panel">
+    <div class="panel-header">
+      <span class="panel-title">Packet Stream</span>
+      <span class="panel-badge" id="packet-count-badge">0 packets</span>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <div class="packet-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th><th>Timestamp</th><th>Src IP</th>
+              <th>Dst IP</th><th>Proto</th><th>Size</th>
+              <th>Port</th><th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="packet-tbody">
+            <tr><td colspan="8" style="text-align:center;color:var(--text-dim);padding:20px">
+              Waiting for packets…
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<!-- Top IPs panel (injected dynamically, not in main grid) -->
+<div style="padding:0 28px 18px;position:relative;z-index:1">
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Top Source IPs</span>
+      <span class="panel-badge" id="top-ips-badge">—</span>
+    </div>
+    <div class="panel-body" id="top-ips-body">
+      <div style="color:var(--text-dim);font-size:12px">No data yet.</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Socket.IO ──────────────────────────────────────────────────────────────
+const socket = io();
+let packetRows = [];
+let alertCount = 0;
+let packetCount = 0;
+let prevPktCount = 0;
+
+socket.on('connect',   () => showToast('Connected to gateway'));
+socket.on('disconnect',() => showToast('Connection lost!', true));
+
+socket.on('new_packet', pkt => {
+  addPacketRow(pkt);
+  packetCount++;
+});
+
+socket.on('new_alert', alert => {
+  addAlertItem(alert);
+  alertCount++;
+  document.getElementById('alert-count-badge').textContent = alertCount;
+});
+
+socket.on('status', d => showToast(d.message));
+
+// ── Charts ─────────────────────────────────────────────────────────────────
+const CHART_COLOR = 'rgba(0,229,255,0.8)';
+const CHART_FILL  = 'rgba(0,229,255,0.1)';
+
+const trafficCtx = document.getElementById('trafficChart').getContext('2d');
+const trafficChart = new Chart(trafficCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Packets/min',
+      data: [],
+      borderColor: CHART_COLOR,
+      backgroundColor: CHART_FILL,
+      borderWidth: 2,
+      fill: true,
+      tension: 0.4,
+      pointRadius: 0,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: '#4a7fa8', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#0e3556' } },
+      y: { ticks: { color: '#4a7fa8', font: { family: 'Share Tech Mono', size: 10 } }, grid: { color: '#0e3556' }, beginAtZero: true }
+    }
+  }
+});
+
+const protoCtx = document.getElementById('protoChart').getContext('2d');
+const protoChart = new Chart(protoCtx, {
+  type: 'doughnut',
+  data: {
+    labels: [],
+    datasets: [{
+      data: [],
+      backgroundColor: ['#00e5ff','#7b2fff','#00ff88','#ff9f0a','#ff2d55','#ffd60a','#4a7fa8'],
+      borderWidth: 0,
+    }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'right',
+        labels: { color: '#c8e4f8', font: { family: 'Rajdhani', size: 12 }, padding: 10 }
+      }
+    }
+  }
+});
+
+// ── API polling ────────────────────────────────────────────────────────────
+function refreshStats() {
+  fetch('/api/stats').then(r => r.json()).then(s => {
+    document.getElementById('stat-total').textContent  = fmt(s.total_packets);
+    document.getElementById('stat-clean').textContent  = fmt(s.clean_packets);
+    document.getElementById('stat-anomaly').textContent= fmt(s.anomaly_count);
+    document.getElementById('stat-ips').textContent    = fmt(s.unique_ips);
+  });
+}
+
+function refreshCharts() {
+  fetch('/api/traffic/chart').then(r => r.json()).then(data => {
+    trafficChart.data.labels   = data.map(d => d.time.slice(11));
+    trafficChart.data.datasets[0].data = data.map(d => d.count);
+    trafficChart.update('none');
+  });
+  fetch('/api/protocol/distribution').then(r => r.json()).then(data => {
+    protoChart.data.labels = data.map(d => d.protocol);
+    protoChart.data.datasets[0].data = data.map(d => d.count);
+    protoChart.update('none');
+  });
+}
+
+function refreshTopIps() {
+  fetch('/api/top/ips').then(r => r.json()).then(ips => {
+    if (!ips.length) return;
+    const max = ips[0].count;
+    document.getElementById('top-ips-badge').textContent = `${ips.length} sources`;
+    document.getElementById('top-ips-body').innerHTML = ips.map(ip => `
+      <div class="ip-bar">
+        <span class="ip-label">${ip.ip}</span>
+        <div class="ip-track"><div class="ip-fill" style="width:${(ip.count/max*100).toFixed(1)}%"></div></div>
+        <span class="ip-count">${ip.count} (${ip.attacks} ⚠)</span>
+      </div>
+    `).join('');
+  });
+}
+
+function refreshMonitorStatus() {
+  fetch('/api/monitor/status').then(r => r.json()).then(s => {
+    const dot = document.getElementById('status-dot');
+    const lbl = document.getElementById('monitor-label');
+    if (s.is_monitoring) {
+      dot.className = 'active';
+      lbl.innerHTML = `STATUS: <span style="color:var(--green)">MONITORING</span> · ${fmt(s.packets_captured)} pkts · ${fmt(s.anomalies_detected)} anomalies · uptime ${s.uptime}s`;
+    } else {
+      dot.className = '';
+      lbl.innerHTML = `STATUS: <span style="color:var(--text-dim)">IDLE</span>`;
+    }
+    // pps
+    const pps = ((packetCount - prevPktCount)).toFixed(1);
+    prevPktCount = packetCount;
+    document.getElementById('pps-badge').textContent = `${pps} pkt/s`;
+  });
+}
+
+// ── Controls ───────────────────────────────────────────────────────────────
+function startMonitor() {
+  fetch('/api/monitor/start', {method:'POST'})
+    .then(r => r.json()).then(d => showToast(d.message));
+}
+function stopMonitor() {
+  fetch('/api/monitor/stop', {method:'POST'})
+    .then(r => r.json()).then(d => showToast(d.message));
+}
+function trainModel() {
+  showToast('Training ML model…');
+  fetch('/api/train', {method:'POST'})
+    .then(r => r.json())
+    .then(d => showToast(d.message, d.status !== 'success'));
+}
+
+// ── Packet table ───────────────────────────────────────────────────────────
+const MAX_ROWS = 200;
+function addPacketRow(pkt) {
+  const tbody = document.getElementById('packet-tbody');
+  if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+
+  packetRows.unshift(pkt);
+  if (packetRows.length > MAX_ROWS) packetRows.pop();
+
+  const tr = document.createElement('tr');
+  if (pkt.is_anomaly) tr.className = 'anomaly';
+  const ts = pkt.timestamp ? pkt.timestamp.slice(11,19) : '—';
+  tr.innerHTML = `
+    <td style="color:var(--text-dim)">${packetCount}</td>
+    <td>${ts}</td>
+    <td>${pkt.src_ip}</td>
+    <td>${pkt.dst_ip}</td>
+    <td><span class="tag tag-${pkt.protocol.toLowerCase()}">${pkt.protocol}</span></td>
+    <td>${pkt.size}B</td>
+    <td>${pkt.dst_port || '—'}</td>
+    <td>${pkt.is_anomaly
+      ? `<span class="anomaly-tag">⚠ ANOMALY</span>`
+      : `<span class="clean-tag">✓</span>`}
+    </td>`;
+  tbody.insertBefore(tr, tbody.firstChild);
+  if (tbody.children.length > MAX_ROWS) tbody.removeChild(tbody.lastChild);
+
+  document.getElementById('packet-count-badge').textContent = `${packetCount} packets`;
+}
+
+// ── Alert items ────────────────────────────────────────────────────────────
+function addAlertItem(alert) {
+  const container = document.getElementById('alerts-list');
+  const first = container.querySelector('div[style]');
+  if (first) container.innerHTML = '';
+
+  const div = document.createElement('div');
+  div.className = 'alert-item';
+  const ts = alert.timestamp ? alert.timestamp.slice(11,19) : '—';
+  div.innerHTML = `
+    <div>
+      <span class="alert-severity sev-${alert.severity}">${alert.severity}</span>
+      ${alert.attack_type ? `<span style="font-size:11px;color:var(--orange)">${alert.attack_type}</span>` : ''}
+    </div>
+    <div class="alert-reason">${alert.reason}</div>
+    <div class="alert-meta">${ts} · ${alert.src_ip} → ${alert.dst_ip}</div>`;
+  container.insertBefore(div, container.firstChild);
+}
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+function updateClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-IN', {hour12: false});
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.borderColor = isError ? 'var(--red)' : 'var(--accent)';
+  t.style.color       = isError ? 'var(--red)' : 'var(--accent)';
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function fmt(n) { return Number(n || 0).toLocaleString(); }
+
+// ── Init ───────────────────────────────────────────────────────────────────
+setInterval(updateClock, 1000);
+setInterval(refreshStats,         2000);
+setInterval(refreshCharts,        5000);
+setInterval(refreshTopIps,        8000);
+setInterval(refreshMonitorStatus, 2000);
+
+refreshStats();
+refreshCharts();
+refreshTopIps();
+refreshMonitorStatus();
+updateClock();
+</script>
+</body>
+</html>
